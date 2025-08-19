@@ -41,11 +41,11 @@ Run, jump, and tail‑swipe your way across Ireland’s landscapes and lore as a
 
 ## 🚀 Getting Started
 ### 1) Open locally (quickest)
-Just open `index 6.html` in a modern browser (Chrome, Edge, Firefox, Safari).
+Just open `index.html` in a modern browser (Chrome, Edge, Firefox, Safari).
 
 ### 2) Optional: run a tiny local server
 If you prefer serving files over `http://`:
 ```bash
 # from the project folder
 python3 -m http.server 5500
-# then visit http://localhost:5500/index%206.html
+# then visit http://localhost:5500/index.html
