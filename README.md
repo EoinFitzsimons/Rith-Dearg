@@ -1,5 +1,3 @@
-# Rith-Dearg
-
 # Rith Dearg — A 2D Platformer (HTML/CSS/JS)
 
 Run, jump, and tail‑swipe your way across Ireland’s landscapes and lore as a red squirrel hero.
