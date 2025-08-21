@@ -469,43 +469,51 @@ const LEVEL_THEMES = [
   {name:'Dublin Docklands', sky:'#0a1320', fog:'#1a2947', ground:'#3e5074', deco:'dock'},
 ];
 function rng(seed){ let s=(seed*9301+49297)%233280; return ()=> (s=(s*9301+49297)%233280)/233280; }
-function genLevel(index){
-  const theme=LEVEL_THEMES[index%LEVEL_THEMES.length];
-  const rand=rng(1000+index*77);
-  const width=4800, platforms=[], hazards=[], checkpoints=[], enemies=[];
-  const goalX = width-240, baseY = 420 - (index%4)*10;
-
-  for (let x=0; x<width; x+= rand()*320 + 280){
-    const w=280+rand()*260, y=baseY + (rand()-0.5)*40;
-    platforms.push(new Rect(x,y,w,30));
-
-    // hazards (spike pits) between platforms; clamped later
-    if (rand()<0.28){ const sx=x+w+20; hazards.push(new Rect(sx, baseY+10, 60+rand()*60, 20)); }
-
-    // enemies on this platform
-    if (rand()<0.8){
-      const cx=x+40+rand()*(w-80);
-      const typePool=['puca','raven','cusidhe','wisp','golem'];
-      const type=typePool[Math.floor(rand()*Math.min(4, 2+index/5))];
-      enemies.push({type, x:cx, y:y-30});
+function genLevel(index) {
+  const theme = LEVEL_THEMES[index % LEVEL_THEMES.length];
+  const rand = rng(1000 + index * 77);
+  const width = 4800 + index * 320, platforms = [], hazards = [], checkpoints = [], enemies = [];
+  const goalX = width - 240;
+  const yLevels = [420, 340, 260, 180];
+  const minGap = 180 + index * 6, maxGap = 320 + index * 12;
+  const minPlatW = 180 - index * 2, maxPlatW = 320 + index * 8;
+  const hazardChance = 0.18 + index * 0.012;
+  const enemyChance = 0.7 + index * 0.01;
+  let lastY = yLevels[0];
+  let lastEnd = 0;
+  while (lastEnd < width - 400) {
+    let yIdx = Math.floor(rand() * yLevels.length);
+    if (yLevels[yIdx] === lastY) yIdx = (yIdx + 1) % yLevels.length;
+    const y = yLevels[yIdx];
+    const w = minPlatW + rand() * (maxPlatW - minPlatW);
+    const x = lastEnd + minGap + rand() * (maxGap - minGap);
+    platforms.push(new Rect(x, y, w, 30));
+    lastY = y;
+    lastEnd = x + w;
+    if (rand() < hazardChance) {
+      const sx = x - 60 - rand() * 40;
+      hazards.push(new Rect(sx, y + 24, 60 + rand() * 60, 20));
     }
-    // elevated platforms
-    if (rand()<0.4){
-      const px=x+60, pw=160+rand()*160, py=y-(80+rand()*90);
-      platforms.push(new Rect(px,py,pw,24));
-      if (rand()<0.5) enemies.push({type:'puca', x:px+pw/2, y:py-30});
+    if (rand() < enemyChance) {
+      const cx = x + 40 + rand() * (w - 80);
+      const typePool = ['puca', 'raven', 'cusidhe', 'wisp', 'golem'];
+      const maxType = Math.min(4, 1 + Math.floor(index / 4));
+      const type = typePool[Math.floor(rand() * (maxType + 1))];
+      enemies.push({ type, x: cx, y: y - 30 });
+    }
+    if (rand() < 0.35) {
+      let elevIdx = (yIdx + 1) % yLevels.length;
+      const py = yLevels[elevIdx];
+      const pw = 120 + rand() * 100;
+      const px = x + 60 + rand() * (w - 180);
+      platforms.push(new Rect(px, py, pw, 24));
+      if (rand() < 0.5) enemies.push({ type: 'puca', x: px + pw / 2, y: py - 30 });
     }
   }
-
-  // Checkpoints
-  for (let i=1;i<=4;i++){ const cx=Math.floor((i/5)* (width-400) + 200); checkpoints.push({x:cx, y:baseY-10}); }
-
-  // Goal platform
-  platforms.push(new Rect(goalX-60, baseY-40, 220, 30));
-
-  const level = { theme, width, platforms, hazards, checkpoints, enemies, goalX, gravity: GRAVITY, timeLimit: null, wind: (index%2?20:0) };
-
-  // ✅ Ensure no impossible gaps remain (insert steps / clamp hazards)
+  platforms.unshift(new Rect(0, yLevels[0], 120, 30));
+  for (let i = 1; i <= 4; i++) { const cx = Math.floor((i / 5) * (width - 400) + 200); checkpoints.push({ x: cx, y: yLevels[i % yLevels.length] - 10 }); }
+  platforms.push(new Rect(goalX - 60, yLevels[0] - 40, 220, 30));
+  const level = { theme, width, platforms, hazards, checkpoints, enemies, goalX, gravity: GRAVITY, timeLimit: null, wind: (index % 2 ? 20 : 0) };
   ensureReachability(level);
   return level;
 }
@@ -784,7 +792,9 @@ class Game {
   draw(){
     const t=this.level.theme;
     drawBackground(ctx, t, this.camX, this.level.width);
-    for (const p of this.level.platforms){ ctx.fillStyle=t.ground; ctx.fillRect(Math.floor(p.x-this.camX), Math.floor(p.y), p.w, p.h); ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(Math.floor(p.x-this.camX), Math.floor(p.y)+p.h-4, p.w, 4); }
+    for (const p of this.level.platforms){
+      drawPlatform(ctx, Math.floor(p.x-this.camX), Math.floor(p.y), p.w, p.h, t);
+    }
     for (const s of this.level.hazards) drawSpikes(ctx, Math.floor(s.x-this.camX), Math.floor(s.y), s.w, s.h);
     for (const cp of this.level.checkpoints) drawCheckpoint(ctx, cp.x-this.camX, cp.y);
     drawGoal(ctx, this.level.goalX - this.camX, this.level.platforms[this.level.platforms.length-1].y);
@@ -796,30 +806,133 @@ class Game {
   }
 }
 
-/* Rendering helpers */
-function drawBackground(ctx, theme, camX, levelWidth){
-  const g=ctx.createLinearGradient(0,0,0,VIRTUAL_H); g.addColorStop(0,theme.sky); g.addColorStop(1,theme.fog); ctx.fillStyle=g; ctx.fillRect(0,0,VIRTUAL_W,VIRTUAL_H);
-  const layers=[{speed:0.2,color:'rgba(255,255,255,0.04)'},{speed:0.4,color:'rgba(255,255,255,0.05)'}];
-  for (const L of layers){ ctx.fillStyle=L.color; const offset=-((camX*L.speed)%400); for(let x=offset-400;x<VIRTUAL_W+400;x+=400){ drawSilhouette(ctx,x,theme.deco); } }
-}
-function drawSilhouette(ctx,x,deco){
-  ctx.save(); ctx.translate(x,0);
-  if (deco==='pines'){ ctx.fillRect(50,380,20,120); ctx.beginPath(); ctx.moveTo(60,300); ctx.lineTo(20,380); ctx.lineTo(100,380); ctx.closePath(); ctx.fill(); }
-  else if (['cliffs','coast','coast2'].includes(deco)){ ctx.fillRect(40,420,180,120); ctx.fillRect(260,400,120,140); }
-  else if (deco==='columns'){ for (let i=0;i<5;i++){ ctx.fillRect(30+i*22, 430-(i%3)*10, 16,140); } }
-  else if (deco==='limestone'){ ctx.fillRect(30,450,260,90); }
-  else if (deco==='monastery'){ ctx.fillRect(60,420,50,120); ctx.fillRect(100,380,30,40); }
-  else if (['spirals','walls'].includes(deco)){ ctx.beginPath(); ctx.arc(90,460,40,0,Math.PI*2); ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.stroke(); }
-  else if (['tower','castle'].includes(deco)){ ctx.fillRect(60,360,60,180); ctx.fillRect(130,420,40,120); }
-  else if (['hedges','valley','park'].includes(deco)){ ctx.fillRect(20,460,300,80); }
-  else if (['table-mt','peak','island'].includes(deco)){ ctx.beginPath(); ctx.moveTo(10,520); ctx.lineTo(140,420); ctx.lineTo(340,520); ctx.closePath(); ctx.fill(); }
-  else if (deco==='dock'){ ctx.fillRect(40,460,220,80); ctx.fillRect(270,440,18,100); ctx.fillRect(290,440,18,100); }
+// Sprite-like platform drawing, themed per level
+function drawPlatform(ctx, x, y, w, h, theme) {
+  ctx.save();
+  ctx.fillStyle = theme.ground;
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x + 8, y + h - 8);
+  ctx.lineTo(x + w - 8, y + h - 8);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.13)';
+  ctx.fillRect(x + 4, y + 2, w - 8, 6);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(x, y + h - 6, w, 6);
+  if (theme.deco === 'pines' || theme.deco === 'mounts' || theme.deco === 'valley') {
+    ctx.fillStyle = '#2e5c2e';
+    for (let i = 0; i < w / 32; i++) {
+      ctx.beginPath();
+      ctx.arc(x + 16 + i * 32, y + h - 8, 7, 0, Math.PI, true);
+      ctx.fill();
+    }
+  } else if (theme.deco === 'cliffs' || theme.deco === 'columns') {
+    ctx.fillStyle = '#bfc7d6';
+    for (let i = 0; i < w / 40; i++) {
+      ctx.fillRect(x + 8 + i * 40, y + h - 12, 12, 8);
+    }
+  } else if (theme.deco === 'limestone') {
+    ctx.fillStyle = '#dbe7ff';
+    for (let i = 0; i < w / 36; i++) {
+      ctx.beginPath();
+      ctx.arc(x + 12 + i * 36, y + h - 10, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   ctx.restore();
 }
-function drawSpikes(ctx,x,y,w,h){ const n=Math.floor(w/12); for (let i=0;i<n;i++){ ctx.beginPath(); ctx.moveTo(x+i*12,y+h); ctx.lineTo(x+i*12+6,y); ctx.lineTo(x+i*12+12,y+h); ctx.closePath(); ctx.fillStyle='#b3d7ff'; ctx.fill(); ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.stroke(); } }
-function drawCheckpoint(ctx,x,y){ ctx.fillStyle='#9bd67e'; ctx.fillRect(Math.floor(x-6), Math.floor(y-40), 12,40); ctx.fillStyle='#d9ffd0'; ctx.fillRect(Math.floor(x-10), Math.floor(y-40), 10,10); }
-function drawGoal(ctx,x,yTop){ ctx.fillStyle='#ffe47a'; ctx.fillRect(Math.floor(x), Math.floor(yTop-80), 6,80); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(Math.floor(x+6), Math.floor(yTop-80)); ctx.lineTo(Math.floor(x+66), Math.floor(yTop-70)); ctx.lineTo(Math.floor(x+6), Math.floor(yTop-60)); ctx.closePath(); ctx.fill(); }
-function drawActivePU(ctx,active){ const list=Object.keys(active); if(!list.length) return; ctx.save(); ctx.globalAlpha=0.9; ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.fillRect(VIRTUAL_W-220,10,210,18+list.length*20); ctx.fillStyle='#fff'; ctx.font='12px sans-serif'; ctx.fillText('Power-ups:', VIRTUAL_W-210,24); let y=44; for(const k of list){ ctx.fillStyle='#dff'; ctx.fillText(`${k}: ${active[k].toFixed(1)}s`, VIRTUAL_W-210, y); y+=18; } ctx.restore(); }
+
+function drawBackground(ctx, theme, camX, levelWidth) {
+  const g = ctx.createLinearGradient(0, 0, 0, VIRTUAL_H);
+  g.addColorStop(0, theme.sky);
+  g.addColorStop(0.7, theme.fog);
+  g.addColorStop(1, theme.ground);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
+  const decoType = theme.deco;
+  const decoCount = 3 + Math.floor((levelWidth || VIRTUAL_W) / 1200);
+  for (let i = 0; i < decoCount; i++) {
+    const x = ((i * 700 - camX * 0.2) % (levelWidth || VIRTUAL_W)) - 100;
+    drawLevelDeco(ctx, x, VIRTUAL_H, decoType);
+  }
+}
+function drawLevelDeco(ctx, x, y, decoType) {
+  ctx.save();
+  ctx.translate(x, y);
+  switch (decoType) {
+    case 'pines':
+      for (let i = 0; i < 3; i++) {
+        ctx.save(); ctx.translate(i * 40, 0);
+        ctx.fillStyle = '#1b3a1b'; ctx.fillRect(10, -120, 20, 120);
+        ctx.fillStyle = '#2e5c2e'; ctx.beginPath(); ctx.moveTo(20, -160); ctx.lineTo(0, -120); ctx.lineTo(40, -120); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
+      break;
+    case 'cliffs':
+      ctx.fillStyle = '#3e5477'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(120, -80); ctx.lineTo(220, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#bfc7d6'; ctx.fillRect(60, -40, 40, 20);
+      break;
+    case 'columns':
+      for (let i = 0; i < 5; i++) {
+        ctx.fillStyle = '#566c93'; ctx.fillRect(30 + i * 22, -(i % 3) * 10 - 90, 16, 90 + (i % 3) * 10);
+      }
+      break;
+    case 'limestone':
+      ctx.fillStyle = '#6b7f7f'; ctx.beginPath(); ctx.ellipse(80, -30, 90, 30, 0, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'monastery':
+      ctx.fillStyle = '#3a4d7c'; ctx.fillRect(60, -120, 50, 120);
+      ctx.fillStyle = '#bfc7d6'; ctx.fillRect(100, -160, 30, 40);
+      break;
+    case 'spirals':
+      ctx.strokeStyle = '#ffe47a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(90, -40, 30, 0, Math.PI * 2); ctx.stroke();
+      break;
+    case 'mounts':
+      ctx.fillStyle = '#456a82'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(60, -80); ctx.lineTo(120, 0); ctx.closePath(); ctx.fill();
+      break;
+    case 'bog':
+      ctx.fillStyle = '#4a666d'; ctx.beginPath(); ctx.ellipse(80, -10, 90, 20, 0, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'walls':
+      ctx.fillStyle = '#536e8c'; ctx.fillRect(40, -30, 120, 20);
+      break;
+    case 'tower':
+      ctx.fillStyle = '#4c6c77'; ctx.fillRect(60, -100, 30, 100);
+      ctx.fillStyle = '#bfc7d6'; ctx.fillRect(65, -120, 20, 20);
+      break;
+    case 'castle':
+      ctx.fillStyle = '#4b628a'; ctx.fillRect(60, -100, 60, 100);
+      ctx.fillStyle = '#bfc7d6'; ctx.fillRect(130, -80, 40, 80);
+      break;
+    case 'coast':
+    case 'coast2':
+      ctx.fillStyle = '#3f6688'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(120, -40); ctx.lineTo(220, 0); ctx.closePath(); ctx.fill();
+      break;
+    case 'hedges':
+    case 'valley':
+    case 'park':
+      ctx.fillStyle = '#416a72'; ctx.beginPath(); ctx.ellipse(80, -10, 90, 20, 0, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'table-mt':
+    case 'peak':
+    case 'island':
+      ctx.fillStyle = '#3b5a77'; ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(70, -80); ctx.lineTo(140, 0); ctx.closePath(); ctx.fill();
+      break;
+    case 'dock':
+      ctx.fillStyle = '#3e5074'; ctx.fillRect(40, -30, 120, 20);
+      ctx.fillStyle = '#bfc7d6'; ctx.fillRect(70, -50, 18, 20);
+      break;
+    default:
+      ctx.fillStyle = '#203040'; ctx.fillRect(0, -20, 100, 20);
+      break;
+  }
+  ctx.restore();
+}
 
 /* Game Flow & UI */
 let perfNow=0, lastTime=performance.now()/1000;
