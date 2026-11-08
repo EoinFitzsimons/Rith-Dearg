@@ -134,7 +134,7 @@ class Enemy {
   constructor(type, x, y) {
     this.type = type; this.x = x; this.y = y; this.vx = 0; this.vy = 0; this.w = 36; this.h = 36;
     this.dir = Math.random() < 0.5 ? -1 : 1; this.onGround = false; this.cd = 1 + Math.random(); this.flash = 0; this.wailT = 0;
-    this.home = { x, y }; this.submerged = false; this.leaping = false; this.camX = 0;
+    this.home = { x, y }; this.submerged = false; this.leaping = false; this.camX = 0; this.diveT = 0; this.diveVX = 0; this.diveVY = 0;
     this.hp = { golem: 4, cusidhe: 3, banshee: 3, merrow: 3 }[type] || 2;
     if (type === 'banshee') this.h = 44;
   }
@@ -162,10 +162,21 @@ class Enemy {
       }
       case 'wisp': this.vx = Math.sin(t + this.home.x * 0.01) * 50; this.y = this.home.y + Math.sin(t * 1.8 + this.home.x * 0.008) * 40; break;
       case 'banshee': {
-        this.vx = clamp(dx * 0.4, -60, 60); this.dir = dx < 0 ? -1 : 1;
-        this.y = this.home.y + Math.sin(t * 1.6 + this.home.x) * 18;
         if (this.wailT > 0) this.wailT -= dt;
-        if (dist < 460 && this.cd <= 0) { this.cd = 3.2; this.wailT = 0.6; game.spawnProjectile({ kind: 'wail', x: this.x + this.w / 2 + this.dir * 20, y: this.y + 22, vx: this.dir * 170, vy: 0, life: 2.6, dir: this.dir, r: 16, dmg: 16 }); SND.tone(620, 0.5, 'sine', 0.05, { slideTo: 320 }); }
+        if (this.diveT > 0) {
+          // Mid-dive: swoop along the line that led to the player, then glide back up.
+          this.diveT -= dt; this.vx = this.diveVX; this.y += this.diveVY * dt; this.dir = this.vx < 0 ? -1 : 1;
+          break;
+        }
+        this.vx = clamp(dx * 0.4, -60, 60); this.dir = dx < 0 ? -1 : 1;
+        const hoverY = this.home.y + Math.sin(t * 1.6 + this.home.x) * 18;
+        this.y += (hoverY - this.y) * Math.min(1, dt * 3);
+        const dy = player.y - this.y;
+        if (dist < 220 && dy > 40 && this.cd <= 0) {
+          const T = 0.55;
+          this.diveT = T; this.diveVX = clamp(dx / T, -380, 380); this.diveVY = clamp(dy / T, 140, 760); this.cd = 2.6;
+          SND.tone(880, 0.4, 'sawtooth', 0.04, { slideTo: 240 });
+        } else if (dist < 460 && this.cd <= 0) { this.cd = 3.2; this.wailT = 0.6; game.spawnProjectile({ kind: 'wail', x: this.x + this.w / 2 + this.dir * 20, y: this.y + 22, vx: this.dir * 170, vy: 0, life: 2.6, dir: this.dir, r: 16, dmg: 16 }); SND.tone(620, 0.5, 'sine', 0.05, { slideTo: 320 }); }
         break;
       }
       case 'merrow': {

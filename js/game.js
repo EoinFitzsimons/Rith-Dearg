@@ -284,10 +284,11 @@ function nextLevel() {
   if (next >= TOTAL_LEVELS) { toMenu(); return; }
   showScreen(null); game.startLevel(next); game.state = STATE.PLAYING;
 }
+function runTotal() { return game.score + (game.state === STATE.LEVEL_COMPLETE ? 0 : game.levelScore); }
 function gameOver() {
   if (!game || game.state !== STATE.PLAYING) return;
   game.state = STATE.GAME_OVER; clearInput(); SND.stopMusic(); SND.gameOverCue();
-  $('goSummary').innerHTML = `You fell on level ${game.levelIndex + 1}: ${game.level.theme.name}.<br/>Final score <b>${game.score + game.levelScore}</b>`;
+  $('goSummary').innerHTML = `You fell on level ${game.levelIndex + 1}: ${game.level.theme.name}.<br/>Final score <b>${runTotal()}</b>`;
   $('goSaved').textContent = ''; $('goName').value = Store.get('rd_name', '');
   showScreen('gameOver');
 }
@@ -296,7 +297,7 @@ function saveScore(inputId, msgId) {
   const name = ($(inputId).value || '').trim().substring(0, 16);
   if (!name) { $(msgId).textContent = 'Type a name first.'; return; }
   Store.set('rd_name', name);
-  addLB({ name, score: game.score + (game.state === STATE.GAME_OVER ? game.levelScore : 0), level: game.levelIndex + 1, date: new Date().toISOString() });
+  addLB({ name, score: runTotal(), level: game.levelIndex + 1, date: new Date().toISOString() });
   $(msgId).textContent = 'Saved to the leaderboard.'; SND.ui(); renderLB(); showLBDock(true);
 }
 
@@ -305,7 +306,7 @@ function updateHUD() {
   if (!game || !game.level || game.state === STATE.MENU) return;
   $('hudLevel').textContent = game.levelIndex + 1; $('hudTotal').textContent = TOTAL_LEVELS;
   $('hudLevelName').textContent = game.level.theme.name;
-  $('hudScore').textContent = game.score + game.levelScore;
+  $('hudScore').textContent = runTotal();
   $('hudKills').textContent = game.kills; $('hudAcorns').textContent = game.acornCount;
   $('hudTime').textContent = game.tLevel.toFixed(1);
   $('healthFill').style.width = (clamp(game.player.health / MAX_HEALTH, 0, 1) * 100) + '%';
