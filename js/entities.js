@@ -63,12 +63,13 @@ class Player {
   physics(dt, level, game) {
     const cx = this.x + this.width / 2, cy = this.y + this.height / 2;
     const wasWater = this.water;
-    this.water = waterAt(level, cx, cy);
+    /* probe near the feet so a floating squirrel keeps its head above the surface */
+    this.water = waterAt(level, cx, this.y + this.height - 8);
     if (this.water && !wasWater && this.vy > 150) { SND.splash(); game.splash(cx, this.water.y, 14); }
     if (!this.water && wasWater) game.splash(cx, wasWater.y, 6);
     if (this.water) {
-      const depth = cy - this.water.y;
-      const buoy = input.down ? 0 : clamp(depth / 30, 0, 1) * 2000;
+      const depth = this.y + this.height - this.water.y;
+      const buoy = input.down ? 0 : clamp(depth / 40, 0, 1) * 2000;
       this.vy += (level.gravity * 0.45 - buoy) * dt;
       this.vy *= Math.pow(0.08, dt);
       this.vy = clamp(this.vy, -420, input.down ? 260 : 170);
