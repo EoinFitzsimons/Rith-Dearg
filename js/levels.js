@@ -263,7 +263,8 @@ function buildDublinSkyline() {
   /* the arena: a long rooftop walled at both ends */
   const AX = 3400, AW = 1200;
   L.platforms.push(Rect(AX, 420, AW, 30));
-  L.platforms.push(Rect(AX - 40, 240, 40, 180), Rect(AX + AW, 240, 40, 180));
+  /* a step up to a low lip on the way in; the far wall is full height */
+  L.platforms.push(Rect(AX - 200, 400, 130, 24), Rect(AX - 40, 350, 40, 70), Rect(AX + AW, 240, 40, 180));
   L.platforms.push(Rect(AX + 300, 320, 140, 22), Rect(AX + 760, 320, 140, 22));
   L.arena = Rect(AX, 0, AW, VIRTUAL_H);
   L.boss = { x: AX + AW - 300, y: 330 };
