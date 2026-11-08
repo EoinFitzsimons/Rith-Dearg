@@ -1,51 +1,77 @@
-# Rith Dearg — A 2D Platformer (HTML/CSS/JS)
+# Rith Dearg (Red Run)
 
-Run, jump, and tail‑swipe your way across Ireland’s landscapes and lore as a red squirrel hero.
+**Play it:** <https://eoinfitzsimons.github.io/Rith-Dearg/>
 
-> **Rith Dearg** (Irish for **Red Run**) is a browser‑based 2D platformer built with plain **HTML, CSS, and JavaScript**. Play directly in your web browser—no installs required.
+![Rith Dearg — a red squirrel leaping between drifting ledges above the Cliffs of Moher](thumbnail.png)
 
----
+Rith Dearg is a browser platformer about a red squirrel running the length of Ireland. Twenty-five levels take you from the oak woods of Killarney, over the Cliffs of Moher and the Burren's limestone, through Glendalough's glen and lakes, and finally across the Dublin rooftops where the Dullahan — the headless horseman of Irish folklore — guards the last gate.
 
-## ✨ Features
-- **20 handcrafted levels** themed around Irish landscapes and folklore.
-- **Score system** that rewards **fast times**, **enemies defeated**, and **power‑ups collected**.
-- **Lives & health**, **checkpoints**, and **six unique power‑ups**.
-- **Distinct enemy behaviors** and attacks to master.
-- **Local leaderboard** to track your best runs.
-- **Unlockable squirrel skins** via score milestones.
+It is a single static page: plain HTML, CSS and JavaScript with no framework, no build step and no asset files. Every sprite, backdrop and sound is drawn or synthesised in code at run time.
 
-## 🎮 Controls
-**Desktop**
-- Move: `←/→` or `A/D`
-- Jump: `W`, `↑`, or `Space`
-- Attack: `J` / `K`
-- Pause: `P` or `Esc`
-- Leaderboard: `L`
+## How to play
 
-**Mobile**
-- Use the on‑screen touch controls.
+| Action | Keys |
+| --- | --- |
+| Move | `←` / `→` or `A` / `D` |
+| Jump (tap for a hop, hold for a long leap) | `Space`, `W` or `↑` |
+| Swim stroke (in water) | tap jump |
+| Dive | `S` or `↓` |
+| Tail swipe (attack) | `J` or `K` |
+| Pause | `P` or `Esc` |
+| Mute / unmute | `M` |
+| Leaderboard | `L` |
 
-## 🧭 Menus & Screens
-- **Main Menu:** *Start Game*, *Customize*, *Leaderboard*, *How to Play*
-- **Pause Menu:** *Resume*, *Restart Level*, *Quit to Menu*
-- **Level Complete:** *Next Level*, *Save Score*, *Quit*
-- **Game Over:** *Try Again*, *Save Score*, *Quit*
-- **Customize Squirrel:** Unlock/select skins; choose fur color and an accessory.
+On phones and tablets a touch pad appears with the same controls. Press **Play** to start, or open **Level Select** to replay any stage you have already reached.
 
-## 🧩 Scoring & Progression
-- **Level counter:** `Level: 1/20` (progress across all levels)
-- **HUD:** Real‑time **Score**, **Time**, **Enemies**, and **Power‑ups**
-- **Cosmetics:** Unlock additional skins by reaching **score milestones**.
+### Rules of the run
 
----
+- You start with three lives and a health bar. Enemies and spikes drain health; when it hits zero you lose a life and return to the last checkpoint.
+- Falling off the bottom of the level costs a life.
+- Reach the signpost at the end of a level to clear it. Clearing a level unlocks the next one and saves your best score.
+- Tail-swipe foes for points and the occasional power-up drop. Collect acorns for a bonus and finish quickly for a time bonus.
 
-## 🚀 Getting Started
-### 1) Open locally (quickest)
-Just open `index.html` in a modern browser (Chrome, Edge, Firefox, Safari).
+### Mechanics
 
-### 2) Optional: run a tiny local server
-If you prefer serving files over `http://`:
-```bash
-# from the project folder
-python3 -m http.server 5500
-# then visit http://localhost:5500/index.html
+- **Water** — you float at the surface and can leap out. Dive and you have six seconds of breath; stay under longer and you take damage until you surface.
+- **Wind** — gusts push you sideways, strongest in the air. Lean into them.
+- **Moving ledges** — platforms that drift horizontally or vertically carry you with them.
+- **Boss** — the Dullahan paces its rooftop arena, charges and throws its head. It is stunned when it hits a wall after a charge; that is your moment to strike. Defeat it to unlock the gate.
+
+### Power-ups
+
+Speed Boost · Shield · Extra Life · Time Freeze · Score Multiplier · Health Restore
+
+### Enemies
+
+Púca (hopping rabbit spirit), raven, cú sídhe (fairy hound), will-o'-the-wisp, stone golem, banshee (floats and dives when you are near), merrow (surfaces from the water to leap at you) and the Dullahan boss.
+
+## Features
+
+- 25 levels: 20 procedurally generated stages, each with its own Irish landscape and palette, plus five handcrafted stages — Lough Tay, Burren Winds, Moher Ledges, Glendalough Lakes and Dublin Skyline — introducing water, wind, moving platforms and the boss encounter.
+- Eleven procedural parallax backdrop families drawn on canvas: forest, sea cliffs, the Giant's Causeway, the Burren, mountains, island, passage tomb, bog, glen with round tower, castle and the Dublin skyline (Poolbeg chimneys, the Spire, Liberty Hall, the Custom House and the Samuel Beckett Bridge).
+- A code-drawn squirrel with idle, run, jump, fall, attack and swim animation, plus unlockable coats and accessories.
+- Title screen with a live animated backdrop, level-select screen, how-to-play and customise screens.
+- Progress, best scores, leaderboard, chosen skin and mute setting are saved in `localStorage`.
+- Synthesised chiptune music (a title theme and a play theme) and sound cues for jumping, swimming, landing, attacking, collecting, taking damage, checkpoints and the boss, all generated with the Web Audio API.
+- Keyboard, mouse and touch input; the canvas scales to any window.
+
+## Running locally
+
+Any static file server will do. From the repository root:
+
+```sh
+python3 -m http.server 8000
+```
+
+then open <http://localhost:8000/>. (Opening `index.html` directly from disk also works in most browsers, but a server matches how GitHub Pages serves it.)
+
+## Technical notes
+
+- **Structure** — `index.html` holds the markup and screens, `css/style.css` the HUD and menus, and the game is split into classic scripts under `js/` loaded in order: `config.js` (constants, storage, RNG), `audio.js` (Web Audio synth), `input.js`, `sprites.js` (all drawing routines), `backdrops.js` (parallax layers), `levels.js` (procedural and handcrafted level data), `entities.js` (player, enemies, boss, power-ups, particles) and `game.js` (loop, screens and glue).
+- **Rendering** — a 960×540 virtual canvas scaled to the window. Each backdrop layer is rendered once to an off-screen canvas tile and scrolled at its own parallax rate; sprites are drawn with Canvas 2D paths every frame.
+- **Levels** — procedural levels use a seeded pseudo-random generator so a given level always has the same layout. Level data is plain objects (platforms, hazards, water, wind zones, movers, acorns, enemies, checkpoints).
+- **Physics** — fixed-cap delta time, axis-separated AABB collision, coyote time for forgiving jumps, buoyancy and drag in water, and wind applied as acceleration.
+- **Audio** — a single `AudioContext` created after the first user gesture; music is scheduled a few steps ahead with oscillators and a short noise buffer for percussion.
+- **Persistence** — `localStorage` keys prefixed `rd_`.
+
+No external libraries, images, fonts or audio files are used.
