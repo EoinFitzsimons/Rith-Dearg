@@ -103,7 +103,7 @@ kbd { display: inline-block; padding: 0 5px; border-radius: 4px; border: 1px sol
 #lbDock .card { pointer-events: auto; background: var(--ui-bg); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 10px 12px; overflow: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.45); }
 #lbDock .card h2 { margin: 0; font-size: 1.05rem; }
 #lbDock ol { margin: .5rem 0 0; padding-left: 1.25rem; max-height: 48vh; overflow: auto; font-size: 0.9rem; }
-#topRight { position: absolute; right: 8px; bottom: 8px; z-index: 9; display: flex; gap: 6px; }
+#topRight { position: absolute; right: 8px; bottom: 8px; z-index: 12; display: flex; gap: 6px; }
 @media (pointer: coarse) { #topRight { top: 8px; bottom: auto; } .hud { right: 190px; } }
 #topRight button { padding: .45rem .65rem; }
 @media (max-width: 700px) { #lbDock { top: 8px; width: 86vw; max-height: 60vh; } }
