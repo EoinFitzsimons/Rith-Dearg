@@ -45,7 +45,10 @@ const Store = {
   get(key, fallback) { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
   set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ } },
 };
-function getSavedSkinId() { return Store.get('rd_skin', 'classic'); }
+/* Older saves stored the skin id as a bare string rather than JSON. */
+function getSavedSkinId() {
+  try { const raw = localStorage.getItem('rd_skin'); if (raw === null) return 'classic'; try { return JSON.parse(raw); } catch { return raw; } } catch { return 'classic'; }
+}
 function saveSkinId(id) { Store.set('rd_skin', id); }
 function getLB() { const lb = Store.get('rd_lb', []); return Array.isArray(lb) ? lb : []; }
 function setLB(arr) { Store.set('rd_lb', arr.slice(0, 20)); }
