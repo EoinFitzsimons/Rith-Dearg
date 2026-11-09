@@ -391,7 +391,11 @@ $('btnLBHide').addEventListener('click', () => { SND.ui(); showLBDock(false); })
 $('btnLBReset').addEventListener('click', () => { if (confirm('Reset the local leaderboard?')) { setLB([]); renderLB(); } });
 $('btnMute').addEventListener('click', () => { SND.ensure(); setMuted(SND.toggleMuted()); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && game && game.state === STATE.PLAYING) togglePause(); });
-function unlockAudio() { if (SND.unlocked) return; SND.unlocked = true; SND.ensure(); if (game && game.state === STATE.MENU) SND.startMusic('title'); }
+function unlockAudio() {
+  if (SND.unlocked) return; SND.unlocked = true; SND.ensure();
+  if (game && game.state === STATE.MENU) SND.startMusic('title');
+  else if (game && game.state === STATE.PLAYING) SND.startMusic('play'); /* a level opened via ?level= started before the first gesture */
+}
 window.addEventListener('pointerdown', unlockAudio, { once: true });
 window.addEventListener('keydown', unlockAudio, { once: true });
 
