@@ -159,7 +159,13 @@ function genProceduralLevel(index) {
   const groundPool = index < 4 ? ['puca'] : index < 8 ? ['puca', 'cusidhe'] : ['puca', 'cusidhe', 'golem'];
   const flyPool = index < 2 ? [] : index < 6 ? ['raven'] : index < 12 ? ['raven', 'wisp'] : ['raven', 'wisp', 'banshee'];
   let cx = 0, cy = 420, last = null, sinceCP = 0, segments = 0;
-  const plat = (x, y, w, h = 30) => { const p = Rect(Math.round(x), Math.round(y), Math.round(w), h); L.platforms.push(p); last = p; cx = p.x + p.w; cy = p.y; sinceCP += p.w; return p; };
+  /* every ledge placed a direct leap away from the previous one gets an acorn trail tracing the jump */
+  const plat = (x, y, w, h = 30) => {
+    const p = Rect(Math.round(x), Math.round(y), Math.round(w), h);
+    const gap = p.x - cx, rise = cy - p.y;
+    if (last && gap >= 40 && gap <= maxGap(rise) + 20) acornsOverGap(L, cx, cy, p.x, p.y);
+    L.platforms.push(p); last = p; cx = p.x + p.w; cy = p.y; sinceCP += p.w; return p;
+  };
   const cairn = () => { if (last && sinceCP > 500) { checkpointOn(L, last, 0.5); sinceCP = 0; } };
   /* y drifts back toward the middle band so no pattern can run out of head room */
   const stepY = () => { if (cy <= 260) return 60; if (cy >= 400) return -60; return pick([-60, 0, 0, 60]); };
@@ -183,10 +189,9 @@ function genProceduralLevel(index) {
       for (let i = 0; i < n; i++) {
         rise = i === 0 ? -stepY() : pick([0, 0, 40, -40]);
         if (cy - rise < Y_HIGH) rise = 0; if (cy - rise > Y_LOW) rise = 0;
-        const fromX = cx, fromY = cy, gap = designGap(rise, d);
+        const gap = designGap(rise, d);
         const p = plat(cx + gap, cy - rise, between(150 - 30 * d, 200));
-        acornsOverGap(L, fromX, fromY, p.x, p.y);
-        if (index >= 14 && i === 1 && rand() < 0.5) flyingEnemy(L, 'wisp', fromX + gap / 2 - 18, Math.min(fromY, p.y) - 190);
+        if (index >= 14 && i === 1 && rand() < 0.5) flyingEnemy(L, 'wisp', p.x - gap / 2 - 18, Math.min(p.y + rise, p.y) - 190);
       }
       if (index >= 2 && rand() < 0.3 + 0.3 * d) groundEnemy(L, pick(groundPool), last, 0.7);
     },
