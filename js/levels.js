@@ -87,93 +87,201 @@ const LEVEL_NOTES = {
   24: 'The Dullahan waits on the rooftops. Defeat it to open the gate.',
 };
 
-const MAX_CLIMB_PX = (PLAYER.jumpVel * PLAYER.jumpVel) / (2 * GRAVITY);
-function computeMaxGap(yFrom, yTo) {
-  const dy = yFrom - yTo;
-  if (dy < -MAX_CLIMB_PX) return 0;
-  const disc = Math.max(0, PLAYER.jumpVel * PLAYER.jumpVel + 2 * GRAVITY * dy);
-  const t = (PLAYER.jumpVel + Math.sqrt(disc)) / GRAVITY;
-  return PLAYER.baseSpeed * t * 0.85;
-}
-/* Insert stepping platforms wherever two neighbours are too far apart to jump between. */
-function ensureReachability(level) {
-  const plats = level.platforms.slice().sort((a, b) => a.x - b.x);
-  for (let i = 0; i < plats.length - 1; i++) {
-    let p0 = plats[i], p1 = plats[i + 1], guard = 0;
-    while (guard++ < 20) {
-      const maxGap = computeMaxGap(p0.y, p1.y), gap = p1.x - (p0.x + p0.w);
-      const tooHigh = p1.y < p0.y - MAX_CLIMB_PX + 8;
-      if (gap <= maxGap && !tooHigh) break;
-      const stepGap = Math.max(60, Math.min(maxGap * 0.75, gap * 0.5));
-      let targetY = p0.y + (p1.y - p0.y) * 0.5;
-      targetY = clamp(targetY, p0.y - MAX_CLIMB_PX + 10, p0.y + 120);
-      const np = Rect(p0.x + p0.w + stepGap, Math.round(targetY), 160, 24);
-      plats.splice(i + 1, 0, np); p0 = np;
-    }
+/* ---------- jump reach ----------
+ * Measured in headless Chrome by running the real physics (jumpVel 780, gravity 2200, air speed 240):
+ * the widest gap the squirrel clears with a held jump and a run-up, for a given rise to the landing ledge.
+ * Negative rise is a drop. Layouts use a fraction of these so every leap has margin. */
+const JUMP_REACH = [[-160, 196], [-120, 192], [-60, 180], [0, 160], [40, 148], [60, 140], [80, 136], [100, 124], [120, 108], [130, 0]];
+function maxGap(rise) {
+  if (rise <= JUMP_REACH[0][0]) return JUMP_REACH[0][1];
+  for (let i = 1; i < JUMP_REACH.length; i++) {
+    const [r0, g0] = JUMP_REACH[i - 1], [r1, g1] = JUMP_REACH[i];
+    if (rise <= r1) return Math.round(lerp(g0, g1, (rise - r0) / (r1 - r0)));
   }
-  level.platforms = plats;
+  return 0;
 }
+/* A comfortable gap for a given rise: 55 % of the maximum on level 1, 80 % on level 20. */
+function designGap(rise, d, scale = 1) { return Math.round(maxGap(rise) * (0.55 + 0.25 * d) * scale); }
 
 function emptyLevel(index, width) {
   return {
     index, theme: LEVEL_THEMES[index], width, platforms: [], movers: [], hazards: [], water: [], windZones: [],
-    checkpoints: [], enemies: [], acorns: [], goalX: width - 200, goalY: 420, boss: null, gravity: GRAVITY,
+    checkpoints: [], enemies: [], acorns: [], powerups: [], goalX: width - 200, goalY: 420, boss: null, gravity: GRAVITY,
     start: { x: 60, y: 300 },
   };
 }
 function addAcornArc(level, x, y, n = 3, spread = 26) {
   for (let i = 0; i < n; i++) level.acorns.push({ x: x + i * spread, y: y - Math.sin((i / (n - 1 || 1)) * Math.PI) * 24 });
 }
-function checkpointOn(level, p) { level.checkpoints.push({ x: p.x + p.w / 2, y: p.y }); }
-function placeCheckpoints(level, count = 4) {
-  const plats = level.platforms.filter(p => p.w >= 100).sort((a, b) => a.x - b.x);
-  for (let i = 1; i <= count; i++) {
-    const target = (i / (count + 1)) * level.width;
-    let best = null;
-    for (const p of plats) if (!best || Math.abs(p.x + p.w / 2 - target) < Math.abs(best.x + best.w / 2 - target)) best = p;
-    if (best && !level.checkpoints.some(c => Math.abs(c.x - (best.x + best.w / 2)) < 200)) checkpointOn(level, best);
+/* Acorns traced along the jump between two ledges so the arc shows the player the leap. */
+function acornsOverGap(level, fromX, fromY, toX, toY, n = 3) {
+  const apex = Math.min(fromY, toY) - 72;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 1) / (n + 1), x = lerp(fromX, toX, t);
+    const y = lerp(fromY, toY, t) - 48 - Math.sin(t * Math.PI) * (lerp(fromY, toY, t) - 48 - apex);
+    level.acorns.push({ x, y });
   }
 }
+function checkpointOn(level, p, at = 0.5) {
+  const x = p.x + p.w * at;
+  if (level.checkpoints.some(c => Math.abs(c.x - x) < 400)) return;
+  level.checkpoints.push({ x, y: p.y });
+}
+/* Enemies stand in the far half of a ledge so they are on screen before the squirrel lands. */
+function groundEnemy(level, type, p, at = 0.65) { level.enemies.push({ type, x: p.x + p.w * at - 18, y: p.y - 40 }); }
+function flyingEnemy(level, type, x, y) { level.enemies.push({ type, x, y }); }
+function spikesOn(level, p, at, w = 50) { const h = Rect(Math.round(p.x + p.w * at - w / 2), p.y - 14, w, 14); level.hazards.push(h); return h; }
+function powerUpAt(level, kind, x, y) { level.powerups.push({ kind, x: x - 12, y: y - 30 }); }
+/* A moving ledge that shuttles between two left-edge positions. */
+/* Mover speeds are capped so a platform never outruns the squirrel's air speed (peak velocity = range × speed). */
+function shuttle(level, x0, x1, y, w = 120, speed = 1.2, phase = 0) {
+  const range = (x1 - x0) / 2;
+  const m = { x: (x0 + x1) / 2, y, w, h: 20, axis: 'x', range, speed: Math.min(speed, 100 / range), phase };
+  level.movers.push(m); return m;
+}
+function lift(level, x, y0, y1, w = 110, speed = 1.2, phase = 0) {
+  const range = (y1 - y0) / 2;
+  const m = { x, y: (y0 + y1) / 2, w, h: 20, axis: 'y', range, speed: Math.min(speed, 110 / range), phase };
+  level.movers.push(m); return m;
+}
 
-/* ---------- procedural levels 1–20 ---------- */
+/* ---------- procedural levels 1–20 ----------
+ * Each level is a chain of layout patterns (runs, gap sequences, staircases, hazard runs, moving-ledge
+ * bridges, vertical climbs, lifts and an optional high road) parameterised by a difficulty d in 0..1.
+ * Every gap is taken from the measured jump table; hard patterns are preceded by a cairn (checkpoint). */
+const Y_HIGH = 200, Y_LOW = 440;
 function genProceduralLevel(index) {
   const rand = rng(1000 + index * 77);
-  const width = 4800 + index * 280;
-  const level = emptyLevel(index, width);
-  const yLevels = [420, 340, 260, 180];
-  const minGap = 170 + index * 6, maxGap = 300 + index * 10;
-  const minPlatW = 190 - index * 2, maxPlatW = 330 + index * 6;
-  const hazardChance = 0.15 + index * 0.014, enemyChance = 0.55 + index * 0.015;
-  const typePool = ['puca', 'raven', 'cusidhe', 'wisp', 'golem', 'banshee'];
-  const maxType = Math.min(typePool.length - 1, 1 + Math.floor(index / 4));
-  let lastY = yLevels[0], lastEnd = 140;
-  level.platforms.push(Rect(0, 420, 160, 30));
-  while (lastEnd < width - 420) {
-    let yIdx = Math.floor(rand() * yLevels.length);
-    if (yLevels[yIdx] === lastY) yIdx = (yIdx + 1) % yLevels.length;
-    const y = yLevels[yIdx], w = minPlatW + rand() * (maxPlatW - minPlatW), x = lastEnd + minGap + rand() * (maxGap - minGap);
-    const p = Rect(x, y, w, 30);
-    level.platforms.push(p);
-    lastY = y; lastEnd = x + w;
-    if (w > 240 && rand() < hazardChance) level.hazards.push(Rect(x + w * 0.45, y - 14, 46 + rand() * 30, 14));
-    if (rand() < enemyChance && w > 120) {
-      const type = typePool[Math.floor(rand() * (maxType + 1))];
-      level.enemies.push({ type, x: x + 60 + rand() * (w - 120), y: y - 40 });
-    }
-    if (rand() < 0.45) addAcornArc(level, x + 30 + rand() * Math.max(10, w - 110), y - 60, 3);
-    else if (rand() < 0.3) addAcornArc(level, lastEnd + 40, y - 90, 3, 34);
-    if (rand() < 0.35) {
-      const py = yLevels[(yIdx + 1) % yLevels.length], pw = 120 + rand() * 100, px = x + 60 + rand() * Math.max(10, w - 180);
-      level.platforms.push(Rect(px, py, pw, 24));
-      if (rand() < 0.5) level.enemies.push({ type: 'puca', x: px + pw / 2, y: py - 40 });
-      else addAcornArc(level, px + 20, py - 50, 3);
-    }
+  const d = index / 19;
+  const L = emptyLevel(index, 0);
+  const pick = arr => arr[Math.floor(rand() * arr.length)];
+  const between = (a, b) => a + rand() * (b - a);
+  const groundPool = index < 4 ? ['puca'] : index < 8 ? ['puca', 'cusidhe'] : ['puca', 'cusidhe', 'golem'];
+  const flyPool = index < 2 ? [] : index < 6 ? ['raven'] : index < 12 ? ['raven', 'wisp'] : ['raven', 'wisp', 'banshee'];
+  let cx = 0, cy = 420, last = null, sinceCP = 0, segments = 0;
+  const plat = (x, y, w, h = 30) => { const p = Rect(Math.round(x), Math.round(y), Math.round(w), h); L.platforms.push(p); last = p; cx = p.x + p.w; cy = p.y; sinceCP += p.w; return p; };
+  const cairn = () => { if (last && sinceCP > 500) { checkpointOn(L, last, 0.5); sinceCP = 0; } };
+  /* y drifts back toward the middle band so no pattern can run out of head room */
+  const stepY = () => { if (cy <= 260) return 60; if (cy >= 400) return -60; return pick([-60, 0, 0, 60]); };
+
+  /* start: a safe, wide ledge */
+  plat(0, 420, 320);
+  if (index > 0) addAcornArc(L, 150, 360, 3);
+
+  const patterns = {
+    run() {
+      const rise = -stepY(); const w = between(220, 340);
+      const p = plat(cx + designGap(rise, d, between(0.7, 1)), cy - rise, w);
+      if (rand() < 0.5 + 0.4 * d) groundEnemy(L, pick(groundPool), p, between(0.55, 0.8));
+      if (flyPool.length && rand() < 0.15 + 0.35 * d) flyingEnemy(L, pick(flyPool), p.x + p.w * 0.5, p.y - 150);
+      if (index >= 3 && w >= 320 && rand() < 0.3 + 0.3 * d) { const h = spikesOn(L, p, 0.42, 46 + 16 * d); addAcornArc(L, h.x - 10, p.y - 70, 3, (h.w + 20) / 2); }
+      else addAcornArc(L, p.x + 40, p.y - 56, 3);
+    },
+    gaps() {
+      const n = 2 + Math.floor(rand() * 2) + (d > 0.5 ? 1 : 0);
+      let rise = 0;
+      for (let i = 0; i < n; i++) {
+        rise = i === 0 ? -stepY() : pick([0, 0, 40, -40]);
+        if (cy - rise < Y_HIGH) rise = 0; if (cy - rise > Y_LOW) rise = 0;
+        const fromX = cx, fromY = cy, gap = designGap(rise, d);
+        const p = plat(cx + gap, cy - rise, between(150 - 30 * d, 200));
+        acornsOverGap(L, fromX, fromY, p.x, p.y);
+        if (index >= 14 && i === 1 && rand() < 0.5) flyingEnemy(L, 'wisp', fromX + gap / 2 - 18, Math.min(fromY, p.y) - 190);
+      }
+      if (index >= 2 && rand() < 0.3 + 0.3 * d) groundEnemy(L, pick(groundPool), last, 0.7);
+    },
+    stairUp() {
+      const rise = 50 + Math.round(20 * d), steps = clamp(Math.floor((cy - Y_HIGH) / rise), 2, 4);
+      for (let i = 0; i < steps; i++) plat(cx + designGap(rise, d, 0.9), cy - rise, between(110, 140));
+      const top = plat(cx + designGap(0, d, 0.8), cy, between(200, 240));
+      addAcornArc(L, top.x + 30, top.y - 56, 4, 30);
+      if (flyPool.length && rand() < 0.3 + 0.3 * d) flyingEnemy(L, pick(flyPool), top.x + top.w * 0.5, top.y - 150);
+    },
+    stairDown() {
+      const drop = 60 + Math.round(30 * d), steps = clamp(Math.floor((Y_LOW - cy) / drop), 2, 4);
+      for (let i = 0; i < steps; i++) plat(cx + designGap(-drop, d, 0.85), cy + drop, between(110, 140));
+      const base = plat(cx + designGap(0, d, 0.8), cy, between(220, 260));
+      if (index >= 1 && rand() < 0.5 + 0.3 * d) groundEnemy(L, pick(groundPool), base, 0.7);
+      addAcornArc(L, base.x + 30, base.y - 56, 3);
+    },
+    hazardRun() {
+      cairn();
+      const rise = -stepY(), w = between(420, 480);
+      const p = plat(cx + designGap(rise, d, 0.8), cy - rise, w);
+      const n = d < 0.4 ? 2 : 3;
+      /* spikes sit in the first half of the ledge so a hop over the last one always lands with room to spare */
+      for (let i = 0; i < n; i++) { const h = spikesOn(L, p, 0.2 + i * 0.16, 46 + 18 * d); addAcornArc(L, h.x - 8, p.y - 72, 3, (h.w + 16) / 2); }
+      if (index >= 10 && rand() < 0.5) flyingEnemy(L, 'wisp', p.x + p.w * 0.5, p.y - 160);
+    },
+    bridge() {
+      cairn();
+      const w = 120, travel = 160 + Math.round(120 * d), entry = designGap(0, d, 0.5), exit = designGap(0, d, 0.5);
+      const m = shuttle(L, cx + entry, cx + entry + travel, cy, w, between(1.0, 1.3 + 0.3 * d), rand() * 6);
+      addAcornArc(L, m.x - 20, cy - 80, 3, 30);
+      const far = plat(cx + entry + travel + w + exit, cy, between(220, 260));
+      if (flyPool.length && rand() < 0.2 + 0.3 * d) flyingEnemy(L, 'raven', far.x + 40, far.y - 160);
+      if (index >= 9 && rand() < 0.4) { const h = spikesOn(L, far, 0.35, 46); addAcornArc(L, h.x - 8, far.y - 72, 3, 32); }
+    },
+    climb() {
+      /* a steep vertical climb: tall narrow footholds at a near-maximum rise, then a resting top with a health restore */
+      cairn();
+      const rise = 100, steps = clamp(Math.floor((cy - Y_HIGH) / rise), 2, 3), fw = 90 + Math.round(20 * (1 - d));
+      for (let i = 0; i < steps; i++) { const p = plat(cx + designGap(rise, d, 0.8), cy - rise, fw); addAcornArc(L, p.x + fw / 2, p.y - 50, 1, 0); }
+      const top = plat(cx + designGap(0, d, 0.6), cy, between(200, 240));
+      powerUpAt(L, 'Health Restore', top.x + top.w / 2, top.y);
+      addAcornArc(L, top.x + 40, top.y - 56, 3);
+      if (index >= 6) flyingEnemy(L, 'wisp', top.x + top.w + 60, top.y + 40);
+    },
+    liftUp() {
+      cairn();
+      const top = cy - 140, m = lift(L, cx + 50, top, cy, 110, between(1.0, 1.4), 0);
+      addAcornArc(L, m.x + 55 - 30, top - 40, 3, 30);
+      const far = plat(m.x + m.w + designGap(0, d, 0.5), top + 10, between(220, 260));
+      if (index >= 2 && rand() < 0.5) groundEnemy(L, pick(groundPool), far, 0.7);
+    },
+    highRoad() {
+      const low = plat(cx + designGap(0, d, 0.7), cy, 440 + 60 * d);
+      groundEnemy(L, pick(groundPool), low, 0.4); groundEnemy(L, pick(groundPool), low, 0.8);
+      /* the high road: three small ledges 100 px up, entered from the ledge before the low road */
+      const hy = low.y - 100, hw = 100, gap = designGap(0, d, 0.9);
+      const highs = [];
+      let hx = low.x + 30;
+      for (let i = 0; i < 3; i++) { const h = Rect(hx, hy, hw, 22); L.platforms.push(h); highs.push(h); addAcornArc(L, h.x + 10, h.y - 50, 3, 40); hx += hw + gap; }
+      powerUpAt(L, index >= 12 ? 'Extra Life' : 'Score Multiplier', highs[2].x + hw / 2, hy);
+      cx = low.x + low.w; cy = low.y; last = low;
+    },
+  };
+
+  const available = () => {
+    const list = ['run', 'gaps', 'stairUp', 'stairDown'];
+    if (index >= 3) list.push('hazardRun');
+    if (index >= 5) list.push('bridge');
+    if (index >= 8) list.push('climb', 'highRoad');
+    if (index >= 11) list.push('liftUp');
+    return list.filter(n => !(n === 'stairUp' && cy < 340) && !(n === 'climb' && cy < 410) && !(n === 'liftUp' && cy < 380) && !(n === 'highRoad' && cy < 340) && !(n === 'stairDown' && cy > 300));
+  };
+  const total = 6 + Math.floor(index / 4), hard = new Set(['hazardRun', 'bridge', 'climb', 'liftUp']);
+  let prev = 'run', prevHard = false;
+  while (segments < total) {
+    let name;
+    if (prevHard) name = available().includes('stairDown') && cy < 320 ? 'stairDown' : 'run';
+    else { const opts = available().filter(n => n !== prev); name = pick(opts); }
+    patterns[name]();
+    prevHard = hard.has(name); prev = name; segments++;
+    if (sinceCP > 1300) cairn();
+    if (index >= 6 && segments === Math.floor(total / 2)) powerUpAt(L, 'Health Restore', last.x + last.w - 40, last.y);
   }
-  level.goalX = width - 200; level.goalY = 380;
-  level.platforms.push(Rect(width - 320, 380, 320, 30));
-  ensureReachability(level);
-  placeCheckpoints(level, 4);
-  return level;
+  /* finish: come down to a calm, wide ledge with the gateway */
+  while (cy < 380) plat(cx + designGap(-60, d, 0.8), cy + 60, 140);
+  const end = plat(cx + designGap(0, d, 0.8), cy, 360);
+  addAcornArc(L, end.x + 40, end.y - 56, 3);
+  L.width = end.x + end.w; L.goalX = end.x + end.w - 120; L.goalY = end.y;
+  /* every stage meets at least one foe on open ground so the tail swipe is taught early */
+  if (L.enemies.length < 2) {
+    const wide = L.platforms.filter(p => p.x > 400 && p.w >= 200 && p.x + p.w < L.goalX - 200).sort((a, b) => b.w - a.w);
+    for (const p of wide.slice(0, 2 - L.enemies.length)) groundEnemy(L, 'puca', p, 0.65);
+  }
+  return L;
 }
 
 /* ---------- handcrafted stages 21–25 ---------- */
@@ -181,94 +289,106 @@ function buildLoughTay() {
   const L = emptyLevel(20, 4600);
   const S = 440; /* water surface */
   L.water.push(Rect(0, S, L.width, VIRTUAL_H - S));
-  L.platforms.push(Rect(0, 400, 220, 30));                      /* shore */
-  const jetties = [[380, 400, 160], [720, 390, 140], [1000, 330, 120], [1240, 400, 180], [1600, 380, 150], [1900, 300, 120], [2140, 400, 200], [2560, 390, 140], [2860, 320, 130], [3140, 400, 160], [3500, 380, 170], [3850, 400, 150], [4160, 400, 440]];
+  L.platforms.push(Rect(0, 400, 240, 30));                      /* shore */
+  /* jetties in three jumpable groups separated by swims; every swim ends at a jetty you can climb */
+  const jetties = [[340, 400, 160], [600, 400, 140], [1000, 400, 200], [1300, 360, 140], [1520, 400, 160], [1760, 340, 120], [1960, 400, 220], [2600, 400, 180], [2880, 380, 140], [3100, 400, 160], [3340, 340, 120], [3540, 400, 200], [4160, 400, 440]];
   for (const [x, y, w] of jetties) L.platforms.push(Rect(x, y, w, 22));
   L.platforms.push(Rect(0, 524, L.width, 16)); L.platforms[L.platforms.length - 1].tile = 'sand';
-  for (const [x, y, w] of jetties) if (w >= 150) addAcornArc(L, x + 20, y - 50, 3, 30);
-  for (const x of [560, 1480, 2400, 3300, 4000]) addAcornArc(L, x, 500, 3, 30); /* underwater acorns reward a dive */
-  for (const x of [600, 1420, 2380, 3020, 3700]) L.enemies.push({ type: 'merrow', x, y: 470 });
-  for (const x of [1300, 2200, 3550]) L.enemies.push({ type: 'raven', x, y: 220 });
-  L.enemies.push({ type: 'puca', x: 4300, y: 360 });
-  for (const i of [3, 6, 9, 11]) checkpointOn(L, L.platforms[i + 1]);
+  for (const [x, y, w] of jetties) if (w >= 160) addAcornArc(L, x + 20, y - 50, 3, 30);
+  addAcornArc(L, 1780, 290, 3, 30); addAcornArc(L, 3360, 290, 3, 30);
+  for (const x of [820, 2400, 4000]) addAcornArc(L, x, 500, 3, 30); /* underwater acorns reward a dive */
+  for (const x of [850, 2300, 2480, 3950]) L.enemies.push({ type: 'merrow', x, y: 470 });
+  for (const x of [1400, 3200]) L.enemies.push({ type: 'raven', x, y: 220 });
+  L.enemies.push({ type: 'puca', x: 4400, y: 360 });
+  powerUpAt(L, 'Health Restore', 2060, 400);
+  for (const i of [3, 7, 8, 12]) checkpointOn(L, L.platforms[i]);
   L.goalX = 4480; L.goalY = 400;
   return L;
 }
 function buildBurrenWinds() {
   const L = emptyLevel(21, 4800);
-  const plats = [[0, 420, 200], [340, 400, 180], [660, 360, 220], [1020, 300, 160], [1300, 380, 260], [1700, 420, 200], [2020, 340, 180], [2320, 260, 160], [2600, 360, 240], [2980, 420, 220], [3340, 320, 180], [3660, 400, 200], [3980, 340, 160], [4260, 400, 540]];
+  /* tailwinds carry you over wide gaps; headwinds shorten every leap, so those stretches use short hops */
+  const plats = [[0, 420, 240], [320, 420, 200], [640, 400, 160], [920, 380, 160], [1150, 420, 200], [1460, 420, 260],
+    [1770, 400, 180], [2000, 380, 160], [2210, 360, 200], [2460, 400, 180], [2690, 420, 260],
+    [3050, 380, 160], [3290, 320, 140], [3510, 400, 220], [3860, 400, 160], [4140, 380, 160], [4390, 400, 410]];
   for (const [x, y, w] of plats) L.platforms.push(Rect(x, y, w, 28));
-  L.windZones.push({ x: 300, w: 1100, force: -130 }, { x: 1600, w: 1000, force: 160 }, { x: 2900, w: 1200, force: -190 });
-  L.hazards.push(Rect(1400, 366, 50, 14), Rect(2680, 346, 50, 14), Rect(4400, 386, 40, 14));
-  L.enemies.push({ type: 'puca', x: 760, y: 320 }, { type: 'banshee', x: 1460, y: 250 }, { type: 'golem', x: 2690, y: 300 }, { type: 'banshee', x: 3400, y: 200 }, { type: 'cusidhe', x: 4500, y: 350 });
-  for (const [x, y, w] of plats) if (w >= 180) addAcornArc(L, x + 30, y - 56, 3);
-  addAcornArc(L, 1120, 180, 4, 30); addAcornArc(L, 2400, 150, 4, 30);
-  for (const i of [3, 6, 9, 12]) checkpointOn(L, L.platforms[i]);
-  L.goalX = 4680; L.goalY = 400;
-  ensureReachability(L);
+  L.windZones.push({ x: 520, w: 1000, force: 150 }, { x: 1720, w: 1000, force: -130 }, { x: 3700, w: 800, force: 170 });
+  L.hazards.push(Rect(1580, 406, 50, 14), Rect(2300, 346, 44, 14), Rect(4560, 386, 50, 14));
+  L.enemies.push({ type: 'puca', x: 740, y: 360 }, { type: 'banshee', x: 1100, y: 240 }, { type: 'golem', x: 2350, y: 320 }, { type: 'banshee', x: 3300, y: 200 }, { type: 'cusidhe', x: 4650, y: 360 });
+  for (const [x, y, w] of plats) if (w >= 200) addAcornArc(L, x + 30, y - 56, 3);
+  acornsOverGap(L, 520, 420, 640, 400); acornsOverGap(L, 3730, 400, 3860, 400); acornsOverGap(L, 4300, 380, 4390, 400);
+  addAcornArc(L, 3310, 260, 4, 30);
+  powerUpAt(L, 'Shield', 2770, 420);
+  for (const i of [5, 10, 13]) checkpointOn(L, L.platforms[i]);
+  L.goalX = 4700; L.goalY = 400;
   return L;
 }
 function buildMoherLedges() {
-  const L = emptyLevel(22, 5000);
+  const L = emptyLevel(22, 4800);
   const S = 470;
   L.water.push(Rect(0, S, L.width, VIRTUAL_H - S));
   L.platforms.push(Rect(0, 400, 240, 30), Rect(0, 524, L.width, 16));
   L.platforms[1].tile = 'sand';
-  const ledges = [[520, 360, 140], [1240, 300, 160], [1700, 400, 200], [2500, 260, 150], [3000, 380, 180], [3800, 320, 160], [4400, 400, 600]];
+  /* every ledge after a bridge has a low rock on its left so a fall into the sea is a swim, not a dead end */
+  const ledges = [[620, 400, 200], [1040, 320, 160], [1280, 380, 140], [1500, 400, 220], [2160, 400, 180], [2720, 380, 160], [2960, 400, 200], [3680, 400, 180], [3940, 360, 140], [4160, 400, 640]];
   for (const [x, y, w] of ledges) L.platforms.push(Rect(x, y, w, 28));
-  L.movers.push(
-    { x: 300, y: 390, w: 120, h: 20, axis: 'x', range: 120, speed: 1.2, phase: 0 },
-    { x: 760, y: 340, w: 110, h: 20, axis: 'x', range: 180, speed: 1.0, phase: 1 },
-    { x: 1100, y: 420, w: 100, h: 20, axis: 'y', range: 90, speed: 1.4, phase: 0 },
-    { x: 1960, y: 380, w: 120, h: 20, axis: 'x', range: 200, speed: 1.3, phase: 2 },
-    { x: 2300, y: 400, w: 100, h: 20, axis: 'y', range: 110, speed: 1.1, phase: 1 },
-    { x: 2720, y: 320, w: 120, h: 20, axis: 'x', range: 140, speed: 1.6, phase: 0 },
-    { x: 3250, y: 360, w: 110, h: 20, axis: 'x', range: 220, speed: 1.2, phase: 3 },
-    { x: 3620, y: 420, w: 100, h: 20, axis: 'y', range: 100, speed: 1.5, phase: 2 },
-    { x: 4020, y: 360, w: 110, h: 20, axis: 'x', range: 200, speed: 1.4, phase: 1 },
-  );
-  L.enemies.push({ type: 'raven', x: 900, y: 200 }, { type: 'banshee', x: 1750, y: 260 }, { type: 'raven', x: 2600, y: 180 }, { type: 'merrow', x: 1500, y: 500 }, { type: 'merrow', x: 3450, y: 500 }, { type: 'golem', x: 4600, y: 350 }, { type: 'banshee', x: 3850, y: 220 });
-  for (const [x, y, w] of ledges) addAcornArc(L, x + 20, y - 54, 3, Math.min(30, (w - 40) / 2));
-  addAcornArc(L, 1120, 300, 3, 30); addAcornArc(L, 2320, 280, 3, 30); addAcornArc(L, 3640, 300, 3, 30);
-  for (const i of [3, 4, 6, 7]) checkpointOn(L, L.platforms[i]);
-  L.goalX = 4880; L.goalY = 400;
+  for (const x of [560, 2100, 2660, 3620]) L.platforms.push(Rect(x, 440, 60, 30));
+  shuttle(L, 290, 450, 400, 120, 1.2, 0);
+  lift(L, 880, 320, 440, 100, 1.1, 0);
+  shuttle(L, 1770, 1990, 400, 120, 1.0, 1);
+  shuttle(L, 2390, 2550, 380, 120, 1.3, 2);
+  shuttle(L, 3210, 3510, 400, 120, 1.5, 0);
+  L.enemies.push({ type: 'banshee', x: 1600, y: 260 }, { type: 'merrow', x: 1900, y: 500 }, { type: 'raven', x: 3000, y: 220 }, { type: 'merrow', x: 3400, y: 500 }, { type: 'golem', x: 4500, y: 350 });
+  for (const [x, y, w] of ledges) if (w >= 160) addAcornArc(L, x + 20, y - 54, 3, 30);
+  addAcornArc(L, 340, 320, 3, 30); addAcornArc(L, 1850, 320, 3, 30); addAcornArc(L, 2440, 300, 3, 30); addAcornArc(L, 3330, 320, 3, 30);
+  addAcornArc(L, 1200, 500, 3, 30); addAcornArc(L, 3400, 500, 3, 30);
+  powerUpAt(L, 'Health Restore', 3060, 400);
+  for (const i of [2, 5, 8, 11]) checkpointOn(L, L.platforms[i]);
+  L.goalX = 4680; L.goalY = 400;
   return L;
 }
 function buildGlendaloughLakes() {
   const L = emptyLevel(23, 5200);
   const S = 450;
-  L.water.push(Rect(600, S, 1000, VIRTUAL_H - S), Rect(3300, S, 1100, VIRTUAL_H - S));
-  L.platforms.push(Rect(0, 420, 620, 30), Rect(600, 524, 1000, 16), Rect(3300, 524, 1100, 16));
+  L.water.push(Rect(620, S, 1000, VIRTUAL_H - S), Rect(3300, S, 1130, VIRTUAL_H - S));
+  L.platforms.push(Rect(0, 420, 620, 30), Rect(620, 524, 1000, 16), Rect(3300, 524, 1130, 16));
   L.platforms[1].tile = 'sand'; L.platforms[2].tile = 'sand';
-  const plats = [[800, 400, 140], [1120, 330, 140], [1400, 400, 200], [1600, 420, 500], [2200, 360, 180], [2520, 280, 160], [2820, 360, 200], [3100, 420, 220], [3550, 400, 140], [3900, 330, 150], [4200, 400, 200], [4400, 420, 800]];
+  const plats = [[760, 400, 140], [1170, 330, 140], [1390, 400, 200], [1620, 420, 500], [2200, 360, 180], [2460, 300, 160], [2700, 360, 200], [2990, 420, 220], [3330, 400, 140], [3800, 330, 150], [4230, 400, 200], [4430, 420, 770]];
   for (const [x, y, w] of plats) L.platforms.push(Rect(x, y, w, 28));
-  L.movers.push({ x: 980, y: 380, w: 110, h: 20, axis: 'y', range: 80, speed: 1.2, phase: 0 }, { x: 2050, y: 340, w: 120, h: 20, axis: 'x', range: 140, speed: 1.1, phase: 1 }, { x: 3720, y: 380, w: 110, h: 20, axis: 'x', range: 160, speed: 1.3, phase: 2 }, { x: 4080, y: 360, w: 100, h: 20, axis: 'y', range: 90, speed: 1.4, phase: 0 });
+  lift(L, 980, 320, 440, 110, 1.2, 0);
+  shuttle(L, 3480, 3640, 380, 110, 1.1, 1);
+  lift(L, 4040, 270, 450, 100, 1.3, 0);
   L.windZones.push({ x: 2100, w: 1200, force: 150 });
-  L.hazards.push(Rect(1800, 406, 60, 14), Rect(2900, 346, 50, 14), Rect(4700, 406, 60, 14));
-  L.enemies.push({ type: 'cusidhe', x: 400, y: 380 }, { type: 'merrow', x: 1000, y: 480 }, { type: 'golem', x: 1850, y: 380 }, { type: 'banshee', x: 2600, y: 200 }, { type: 'raven', x: 2300, y: 220 }, { type: 'merrow', x: 3450, y: 480 }, { type: 'merrow', x: 4100, y: 480 }, { type: 'cusidhe', x: 4600, y: 380 }, { type: 'banshee', x: 4900, y: 300 });
-  for (const [x, y, w] of plats) if (w >= 140) addAcornArc(L, x + 24, y - 54, 3);
+  L.hazards.push(Rect(1800, 406, 60, 14), Rect(3080, 406, 50, 14), Rect(4700, 406, 60, 14));
+  L.enemies.push({ type: 'cusidhe', x: 400, y: 380 }, { type: 'merrow', x: 1000, y: 480 }, { type: 'golem', x: 1950, y: 380 }, { type: 'raven', x: 2300, y: 220 }, { type: 'banshee', x: 2600, y: 200 }, { type: 'merrow', x: 3450, y: 480 }, { type: 'merrow', x: 4100, y: 480 }, { type: 'cusidhe', x: 4900, y: 380 }, { type: 'banshee', x: 5000, y: 300 });
+  for (const [x, y, w] of plats) if (w >= 150) addAcornArc(L, x + 24, y - 54, 3);
+  acornsOverGap(L, 2120, 420, 2200, 360); acornsOverGap(L, 2380, 360, 2460, 300);
   addAcornArc(L, 1200, 500, 3, 30); addAcornArc(L, 3800, 500, 3, 30);
-  for (const i of [5, 6, 9, 12]) checkpointOn(L, L.platforms[i]);
+  powerUpAt(L, 'Health Restore', 3060, 420); powerUpAt(L, 'Shield', 1700, 420);
+  for (const i of [6, 10, 14]) checkpointOn(L, L.platforms[i]);
   L.goalX = 5080; L.goalY = 420;
   return L;
 }
 function buildDublinSkyline() {
   const L = emptyLevel(24, 5000);
-  const roofs = [[0, 420, 300], [440, 380, 200], [780, 320, 180], [1100, 400, 260], [1500, 340, 200], [1860, 420, 220], [2220, 360, 200], [2560, 300, 180], [2900, 380, 240]];
+  const roofs = [[0, 420, 300], [400, 380, 200], [700, 320, 180], [980, 400, 260], [1560, 340, 200], [1860, 420, 220], [2100, 360, 200], [2400, 300, 180], [2880, 380, 240], [3200, 400, 130]];
   for (const [x, y, w] of roofs) L.platforms.push(Rect(x, y, w, 30));
-  L.movers.push({ x: 1360, y: 360, w: 100, h: 20, axis: 'x', range: 90, speed: 1.3, phase: 0 }, { x: 2800, y: 340, w: 100, h: 20, axis: 'y', range: 80, speed: 1.2, phase: 1 });
-  L.hazards.push(Rect(1200, 386, 50, 14), Rect(3000, 366, 50, 14));
-  L.enemies.push({ type: 'raven', x: 600, y: 220 }, { type: 'puca', x: 1180, y: 360 }, { type: 'banshee', x: 1700, y: 240 }, { type: 'golem', x: 2300, y: 320 }, { type: 'cusidhe', x: 3000, y: 340 });
+  shuttle(L, 1260, 1380, 380, 100, 1.3, 0);
+  lift(L, 2680, 240, 400, 100, 1.2, 1);
+  L.hazards.push(Rect(1100, 386, 50, 14), Rect(2960, 366, 50, 14));
+  L.enemies.push({ type: 'raven', x: 600, y: 220 }, { type: 'puca', x: 1180, y: 360 }, { type: 'banshee', x: 1700, y: 200 }, { type: 'golem', x: 2200, y: 320 }, { type: 'cusidhe', x: 3020, y: 340 });
   for (const [x, y, w] of roofs) if (w >= 200) addAcornArc(L, x + 30, y - 54, 3);
+  acornsOverGap(L, 300, 420, 400, 380); acornsOverGap(L, 580, 380, 700, 320);
+  powerUpAt(L, 'Health Restore', 3265, 400);
   /* the arena: a long rooftop walled at both ends */
   const AX = 3400, AW = 1200;
   L.platforms.push(Rect(AX, 420, AW, 30));
-  /* a step up to a low lip on the way in; the far wall is full height */
-  L.platforms.push(Rect(AX - 200, 400, 130, 24), Rect(AX - 40, 350, 40, 70), Rect(AX + AW, 240, 40, 180));
+  /* a low lip on the way in; the far wall is full height */
+  L.platforms.push(Rect(AX - 40, 350, 40, 70), Rect(AX + AW, 240, 40, 180));
   L.platforms.push(Rect(AX + 300, 320, 140, 22), Rect(AX + 760, 320, 140, 22));
   L.arena = Rect(AX, 0, AW, VIRTUAL_H);
   L.boss = { x: AX + AW - 300, y: 330 };
-  for (const i of [2, 4, 7]) checkpointOn(L, L.platforms[i]);
+  for (const i of [3, 5, 8]) checkpointOn(L, L.platforms[i]);
   L.checkpoints.push({ x: AX + 80, y: 420 });
   L.goalX = AX + AW - 110; L.goalY = 420; L.goalLocked = true;
   return L;

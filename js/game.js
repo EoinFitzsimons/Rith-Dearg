@@ -33,7 +33,8 @@ class Game {
     this.player = new Player(this.getSkin()); this.player.lives = lives;
     this.player.x = this.level.start.x; this.player.y = this.level.start.y;
     this.camX = 0; this.kills = 0; this.puCount = 0; this.acornCount = 0; this.levelScore = 0; this.tLevel = 0;
-    this.pus = []; this.projectiles = []; this.particles = new Particles(); this.activePU = {};
+    this.pus = (this.level.powerups || []).map(p => { const pu = new PowerUp(p.kind, p.x, p.y); pu.life = Infinity; return pu; });
+    this.projectiles = []; this.particles = new Particles(); this.activePU = {};
     this.checkpoint = { x: this.level.start.x + this.player.width / 2, y: 420 };
     this.banner = 2.8; this.gateOpened = false; this.bossIntro = !!this.boss;
     clearInput();
@@ -249,7 +250,7 @@ function toMenu() {
 }
 function startGame(index = 0) {
   SND.ensure(); showScreen(null); showHUD(true);
-  game = new Game(); game.state = STATE.PLAYING; game.startLevel(index); SND.ui();
+  game = new Game(); game.dev = DEV_LEVEL !== null; game.state = STATE.PLAYING; game.startLevel(index); SND.ui();
 }
 function togglePause() {
   if (!game) return;
@@ -268,7 +269,7 @@ function levelComplete() {
   game.state = STATE.LEVEL_COMPLETE; clearInput();
   const time = game.tLevel, timeBonus = Math.max(0, 1500 - Math.floor(time * 40));
   game.levelScore += timeBonus; game.score += game.levelScore;
-  recordLevelResult(game.levelIndex, game.levelScore);
+  if (!game.dev) recordLevelResult(game.levelIndex, game.levelScore);
   const last = game.levelIndex + 1 >= TOTAL_LEVELS;
   $('lcTitle').textContent = last ? 'Ireland Crossed!' : 'Level Complete';
   $('levelSummary').innerHTML = `<b>Level ${game.levelIndex + 1}: ${game.level.theme.name}</b><br/>` +
@@ -395,7 +396,14 @@ window.addEventListener('pointerdown', unlockAudio, { once: true });
 window.addEventListener('keydown', unlockAudio, { once: true });
 
 /* ---------- initialise ---------- */
+/* Developer level viewer: open index.html?level=7 to jump straight into level 7 for testing.
+ * Progress and best scores are not recorded while viewing a level this way. */
+const DEV_LEVEL = (() => {
+  const n = parseInt(new URLSearchParams(location.search).get('level'), 10);
+  return Number.isInteger(n) && n >= 1 && n <= TOTAL_LEVELS ? n - 1 : null;
+})();
 initTouch(); window.addEventListener('resize', initTouch);
 setMuted(SND.muted);
-toMenu();
+if (DEV_LEVEL !== null) { startGame(DEV_LEVEL); console.info(`Rith Dearg dev viewer: level ${DEV_LEVEL + 1}`); }
+else toMenu();
 requestAnimationFrame(loop);

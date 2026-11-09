@@ -1,18 +1,20 @@
-/* Rith Dearg — keyboard and touch input. */
+/* Rith Dearg — keyboard, mouse and touch input. */
 
 const KEYS = new Set();
+/* Mouse buttons held on the canvas: left = tail swipe, right or middle = jump. */
+const MOUSE = { attack: false, jump: false };
 const input = { left: false, right: false, down: false, jump: false, jumpPressed: false, attack: false, attackPressed: false };
 let jumpLatch = false, attackLatch = false;
 
 function updateInputFromKeys() {
   input.left = KEYS.has('ArrowLeft') || KEYS.has('KeyA');
   input.right = KEYS.has('ArrowRight') || KEYS.has('KeyD');
-  const jumpHeld = ['Space', 'ArrowUp', 'KeyW'].some(k => KEYS.has(k));
+  const jumpHeld = ['Space', 'ArrowUp', 'KeyW'].some(k => KEYS.has(k)) || MOUSE.jump;
   if (jumpHeld && !jumpLatch) input.jumpPressed = true;
   jumpLatch = jumpHeld;
   input.jump = jumpHeld;
   input.down = KEYS.has('ArrowDown') || KEYS.has('KeyS');
-  input.attack = KEYS.has('KeyJ') || KEYS.has('KeyK');
+  input.attack = KEYS.has('KeyJ') || KEYS.has('KeyK') || MOUSE.attack;
   if (input.attack && !attackLatch) input.attackPressed = true;
   attackLatch = input.attack;
 }
@@ -20,7 +22,7 @@ function updateInputFromKeys() {
 function consumeJumpPress() { const p = input.jumpPressed; input.jumpPressed = false; return p; }
 /* A quick tap of the attack key is remembered until the next frame so it is never lost. */
 function consumeAttackPress() { const p = input.attackPressed; input.attackPressed = false; return p; }
-function clearInput() { KEYS.clear(); jumpLatch = false; attackLatch = false; input.jumpPressed = false; input.attackPressed = false; updateInputFromKeys(); }
+function clearInput() { KEYS.clear(); MOUSE.attack = false; MOUSE.jump = false; jumpLatch = false; attackLatch = false; input.jumpPressed = false; input.attackPressed = false; updateInputFromKeys(); }
 
 const GAME_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 window.addEventListener('keydown', (e) => {
@@ -36,6 +38,24 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => { KEYS.delete(e.code); updateInputFromKeys(); });
 window.addEventListener('blur', clearInput);
+
+/* Mouse: only presses that land on the canvas count, so menu buttons and panels keep working as normal.
+ * Releases are caught on the window so a button let go off-canvas never sticks. */
+const gameCanvas = document.getElementById('game');
+function gameplayActive() { return typeof game !== 'undefined' && game && game.state === STATE.PLAYING; }
+gameCanvas.addEventListener('mousedown', (e) => {
+  if (!gameplayActive()) return;
+  e.preventDefault(); SND.ensure();
+  if (e.button === 0) MOUSE.attack = true;
+  else if (e.button === 1 || e.button === 2) MOUSE.jump = true;
+  updateInputFromKeys();
+});
+window.addEventListener('mouseup', (e) => {
+  if (e.button === 0) MOUSE.attack = false;
+  else if (e.button === 1 || e.button === 2) MOUSE.jump = false;
+  updateInputFromKeys();
+});
+gameCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 /* Touch controls are only shown for coarse pointers (phones and tablets). */
 const touchControls = document.getElementById('touchControls');

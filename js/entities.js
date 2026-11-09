@@ -72,7 +72,9 @@ class Player {
       const buoy = input.down ? 0 : clamp(depth / 40, 0, 1) * 2000;
       this.vy += (level.gravity * 0.45 - buoy) * dt;
       this.vy *= Math.pow(0.08, dt);
-      this.vy = clamp(this.vy, -420, input.down ? 260 : 170);
+      /* a stroke under water is capped, but a leap from the surface keeps its full power so ledges can be climbed */
+      const leapCap = this.y + 12 < this.water.y ? -PLAYER.jumpVel * 0.82 : -420;
+      this.vy = clamp(this.vy, leapCap, input.down ? 260 : 170);
       const headUnder = this.y + 10 > this.water.y;
       if (headUnder) { this.breath -= dt; if (this.breath <= 0) { this.breath = 1.2; this.hurt(15, true); } }
       else this.breath = Math.min(MAX_BREATH, this.breath + dt * 2.5);
