@@ -297,6 +297,7 @@ function retry() { if (!game) return; const idx = game.levelIndex; startGame(idx
 function saveScore(inputId, msgId) {
   const name = ($(inputId).value || '').trim().substring(0, 16);
   if (!name) { $(msgId).textContent = 'Type a name first.'; return; }
+  if (game.dev) { $(msgId).textContent = 'Test run (?level=): score not saved.'; return; }
   Store.set('rd_name', name);
   addLB({ name, score: runTotal(), level: game.levelIndex + 1, date: new Date().toISOString() });
   $(msgId).textContent = 'Saved to the leaderboard.'; SND.ui(); renderLB(); showLBDock(true);
